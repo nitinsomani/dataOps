@@ -1,0 +1,40 @@
+{
+  "//": "Pattern 2 — Dynatrace Monaco config for an HTTP synthetic monitor polling the",
+  "//2": "Databricks Jobs REST API. Use this instead of Terraform if your org standardises",
+  "//3": "on Monitoring-as-Code (Monaco). Values in {{ }} are Monaco parameters/env refs.",
+  "//4": "Confirm schema against your Monaco/Dynatrace API version before applying.",
+
+  "name": "Databricks job health - {{ .job_name }}",
+  "frequencyMin": 15,
+  "enabled": true,
+  "type": "HTTP",
+  "locations": ["{{ .synthetic_location_id }}"],
+  "anomalyDetection": {
+    "outageHandling": { "globalOutage": true, "localOutage": false }
+  },
+  "script": {
+    "version": "1.0",
+    "requests": [
+      {
+        "description": "latest run status",
+        "method": "GET",
+        "url": "{{ .databricks_host }}/api/2.1/jobs/runs/list?job_id={{ .job_id }}&limit=1",
+        "configuration": {
+          "acceptAnyCertificate": false,
+          "requestHeaders": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ .databricks_token_credential_ref }}"
+            }
+          ]
+        },
+        "validation": {
+          "rules": [
+            { "type": "httpStatusesList", "passIfFound": false, "value": ">=400" },
+            { "type": "patternConstraint", "passIfFound": true,  "value": "\"result_state\":\"SUCCESS\"" }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+# Pattern 4 — DAB wiring for Dynatrace failure notifications
+#
+# Two ways to attach the Dynatrace failure integration to the medallion job in
+# ssw-dbx-idl2-de. Mirrors the existing webhook_notifications pattern already in
+# resources/edm_medallion.job.yml.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTION B — webhook to the relay (register the relay URL as a Databricks
+# notification destination first, in workspace admin → Notification destinations,
+# then reference its id here alongside the existing Teams webhook).
+# ─────────────────────────────────────────────────────────────────────────────
+resources:
+  jobs:
+    edm_medallion_orchestration:
+      # ... existing config ...
+      webhook_notifications:
+        on_failure:
+          - id: ${var.webhook_destination_id}            # existing Teams
+          - id: ${var.dynatrace_webhook_destination_id}  # NEW: relay -> Dynatrace events
+
+# Add the variable to databricks.yml:
+#   variables:
+#     dynatrace_webhook_destination_id:
+#       description: "Notification destination id for the Dynatrace events relay."
+#       default: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTION C — task-based POST (no relay, no destination registration). Add a
+# trailing task that only runs when something upstream failed.
+# ─────────────────────────────────────────────────────────────────────────────
+#   tasks:
+#     # ... existing bronze/silver/gold tasks ...
+#     - task_key: notify_dynatrace_on_failure
+#       depends_on:
+#         - task_key: gold_well
+#         - task_key: gold_wellbore
+#         - task_key: gold_well_hierarchy
+#         - task_key: gold_trajectory
+#         - task_key: gold_ddr
+#       run_if: AT_LEAST_ONE_FAILED
+#       spark_python_task:
+#         python_file: ../ops/post_dynatrace_event.py
+#
+# Requires secret scope `dynatrace` with key `events-token` (scope: events.ingest).

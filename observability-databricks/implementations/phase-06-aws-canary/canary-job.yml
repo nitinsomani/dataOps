@@ -1,0 +1,54 @@
+# Phase 6 — Synthetic canary job (DAB)
+#
+# Tiny scheduled job that black-box tests the platform the way a user does:
+# a SELECT 1 on the warehouse + a no-op notebook on a small cluster, alerting to
+# the existing Teams destination on failure. Detects workspace/warehouse/auth
+# outages that scheduled pipelines wouldn't reveal until their next run.
+#
+# Add to resources/ in the DAB repo (ssw-dbx-idl2-de) or a dedicated ops bundle.
+
+resources:
+  jobs:
+    observability_canary:
+      name: observability_canary
+      tags:
+        layer: observability
+        managed_by: dab
+      schedule:
+        quartz_cron_expression: "0 */10 * * * ?"   # every 10 minutes
+        timezone_id: America/Chicago
+        pause_status: UNPAUSED
+      email_notifications:
+        on_failure: ${var.pipeline_notification_emails}
+      webhook_notifications:
+        on_failure:
+          - id: ${var.webhook_destination_id}
+      tasks:
+        # Warehouse reachability + auth (serverless SQL)
+        - task_key: warehouse_heartbeat
+          sql_task:
+            warehouse_id: ${var.canary_warehouse_id}
+            query:
+              query_id: ${resources.queries.canary_select_one.id}
+        # Cluster cold-start / notebook execution path
+        - task_key: cluster_heartbeat
+          depends_on:
+            - task_key: warehouse_heartbeat
+          notebook_task:
+            notebook_path: ../ops/canary_noop
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: m5d.large
+            num_workers: 0
+            data_security_mode: SINGLE_USER
+
+  queries:
+    canary_select_one:
+      display_name: "[obs] canary SELECT 1"
+      warehouse_id: ${var.canary_warehouse_id}
+      parent_path: /Shared/observability/canary
+      query_text: "SELECT 1 AS ok"
+
+# Requires vars: canary_warehouse_id, webhook_destination_id,
+# pipeline_notification_emails. The ../ops/canary_noop notebook can be a single
+# cell: `print("ok")`.

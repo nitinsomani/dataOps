@@ -1,0 +1,84 @@
+# Phase 1 — Pipeline Notification Snippets
+
+Copy-ready config for `ssw-dbx-idl2-de`. Two variants depending on how much webhook
+(Teams) parity you want for **standalone** pipeline runs.
+
+---
+
+## Variant A — Native DLT pipeline email notifications (simplest)
+
+Add this `notifications:` block to **every** pipeline resource under
+`resources/*pipeline*.yml` (bronze, all silver, all gold). Example shows the bronze
+pipeline; replicate the block into each file.
+
+```yaml
+resources:
+  pipelines:
+    bronze_edm_ingest_pipeline:
+      name: "${var.pipeline_name_prefix}bronze_edm_ingest_pipeline"
+      catalog: ${var.edm_target_catalog}
+      target: ${var.edm_bronze_schema}
+      # ... existing config ...
+
+      # ── Observability: alert on standalone pipeline failures ──────────────
+      notifications:
+        - email_recipients: ${var.pipeline_notification_emails}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+            - on-flow-failure
+```
+
+Add the variable to `databricks.yml`:
+
+```yaml
+variables:
+  # ... existing ...
+  pipeline_notification_emails:
+    description: "Email recipients (list) for standalone DLT pipeline failures."
+    default: ""
+```
+
+Set it per target in the same place `medallion_notification_emails` is set.
+`email_recipients` expects a **list** of email strings.
+
+---
+
+## Variant B — Webhook (Teams) parity for standalone runs
+
+DLT pipeline `notifications` support email natively; for Teams/webhook on a
+standalone pipeline run, wrap the pipeline in a thin single-task job that carries the
+webhook (mirrors how `edm_medallion.job.yml` already does it). Use this only for
+pipelines you want Teams alerts on outside the orchestration job.
+
+```yaml
+resources:
+  jobs:
+    bronze_edm_ingest_standalone:
+      name: bronze_edm_ingest_standalone
+      tags:
+        layer: standalone-wrapper
+        managed_by: dab
+      email_notifications:
+        on_failure: ${var.pipeline_notification_emails}
+      webhook_notifications:
+        on_failure:
+          - id: ${var.webhook_destination_id}
+      tasks:
+        - task_key: bronze_edm_ingest
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.bronze_edm_ingest_pipeline.id}
+```
+
+> Recommendation: apply **Variant A to all 18 pipelines** (cheap, complete email
+> coverage), and only add Variant B wrappers for the handful of pipelines that are
+> routinely run standalone and warrant Teams paging.
+
+---
+
+## Checklist
+
+- [ ] `notifications:` block added to all 18 `resources/*pipeline*.yml`.
+- [ ] `pipeline_notification_emails` variable declared + set per target.
+- [ ] `databricks bundle validate` passes.
+- [ ] Forced dev failure delivers the alert.
